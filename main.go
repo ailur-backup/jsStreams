@@ -9,7 +9,7 @@ import (
 	"syscall/js"
 )
 
-// ReadableStream implements io.ReaderCloser for a JavaScript ReadableStream.
+// ReadableStream implements io.ReadCloser for a JavaScript ReadableStream.
 type ReadableStream struct {
 	stream js.Value
 	lock   sync.Mutex
