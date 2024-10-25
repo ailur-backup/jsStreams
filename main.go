@@ -3,6 +3,7 @@ package jsStreams
 import (
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 
 	"syscall/js"
@@ -11,7 +12,6 @@ import (
 // ReadableStream implements io.ReaderCloser for a JavaScript ReadableStream.
 type ReadableStream struct {
 	stream js.Value
-	reader js.Value
 	lock   sync.Mutex
 }
 
@@ -31,19 +31,17 @@ func (r *ReadableStream) Read(inputBytes []byte) (n int, err error) {
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(1)
 
-	if r.reader.IsUndefined() {
-		r.reader = r.stream.Call("getReader", map[string]interface{}{"mode": "byob"})
-	}
+	reader := r.stream.Call("getReader", map[string]interface{}{"mode": "byob"})
 
 	resultBuffer := js.Global().Get("Uint8Array").New(len(inputBytes))
-	readResult := r.reader.Call("read", resultBuffer)
+	readResult := reader.Call("read", resultBuffer)
 
 	readResult.Call("then", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		defer waitGroup.Done()
 		data := args[0].Get("value")
 		js.CopyBytesToGo(inputBytes, data)
 		if args[0].Get("done").Bool() {
-			err = errors.New("EOF")
+			err = io.EOF
 		}
 		n = data.Length()
 		return nil
@@ -56,6 +54,8 @@ func (r *ReadableStream) Read(inputBytes []byte) (n int, err error) {
 	}))
 
 	waitGroup.Wait()
+	reader.Call("releaseLock")
+	r.lock.Unlock()
 
 	return n, err
 }
@@ -71,13 +71,88 @@ func (r *ReadableStream) Close() (err error) {
 		}
 	}()
 
-	if !r.reader.IsUndefined() {
-		r.reader.Call("cancel")
-	}
+	r.lock.Lock()
+	r.stream.Call("cancel")
+	r.lock.Unlock()
+	return nil
+}
+
+// NewReadableStream creates a new ReadableStream from a JavaScript ReadableStream.
+func NewReadableStream(stream js.Value) *ReadableStream {
+	return &ReadableStream{stream: stream}
+}
+
+type WritableStream struct {
+	stream js.Value
+	lock   sync.Mutex
+}
+
+func (w *WritableStream) Write(p []byte) (n int, err error) {
+	defer func() {
+		recovered := recover()
+		if recovered != nil {
+			err = fmt.Errorf("panic: %v", recovered)
+		}
+	}()
+
+	w.lock.Lock()
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(2)
+
+	writer := w.stream.Call("getWriter")
+
+	writer.Get("ready").Call("then", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		defer waitGroup.Done()
+
+		buffer := js.Global().Get("Uint8Array").New(len(p))
+		js.CopyBytesToJS(buffer, p)
+
+		writeResult := writer.Call("write", buffer)
+
+		writeResult.Call("then", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			defer waitGroup.Done()
+			n = len(p)
+			return nil
+		}))
+
+		writeResult.Call("catch", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			defer waitGroup.Done()
+			err = errors.New(args[0].Get("message").String())
+			return nil
+		}))
+
+		return nil
+	}))
+
+	waitGroup.Wait()
+	writer.Call("releaseLock")
+	w.lock.Unlock()
+
+	return n, err
+}
+
+func (w *WritableStream) Close() (err error) {
+	defer func() {
+		recovered := recover()
+		if recovered != nil {
+			err = fmt.Errorf("panic: %v", recovered)
+		}
+	}()
+
+	w.lock.Lock()
+	w.stream.Call("close")
+	w.lock.Unlock()
 
 	return nil
 }
 
-func NewReadableStream(stream js.Value) *ReadableStream {
-	return &ReadableStream{stream: stream}
+// NewWritableStream creates a new WritableStream. If a JavaScript WritableStream is provided, it will be used.
+// Otherwise, a new WritableStream will be created.
+func NewWritableStream(stream ...js.Value) *WritableStream {
+	if len(stream) > 0 {
+		return &WritableStream{stream: stream[0]}
+	} else {
+		stream := js.Global().Get("WritableStream").New()
+		return &WritableStream{stream: stream}
+	}
 }
