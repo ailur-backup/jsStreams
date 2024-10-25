@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"syscall/js"
@@ -61,13 +62,12 @@ func (r *ReadableStream) Read(p []byte) (n int, err error) {
 }
 
 // Close closes the ReadableStream. If the stream is already closed, Close does nothing.
-// If the stream is not yet closed, it is canceled. The reader is closed and the underlying source or pipeline is terminated.
-// This method is idempotent, meaning that it can be called multiple times without causing an error.
 func (r *ReadableStream) Close() (err error) {
 	defer func() {
-		recovered := recover()
-		if recovered != nil {
-			err = fmt.Errorf("panic: %v", recovered)
+		// We don't want any errors to be thrown if the stream is already closed.
+		recovery := recover()
+		if !strings.Contains(recovery.(string), "Can not close stream after closing or error") {
+			err = fmt.Errorf("panic: %v", recovery)
 		}
 	}()
 
@@ -138,9 +138,10 @@ func (w *WritableStream) Write(p []byte) (n int, err error) {
 // Close closes the WritableStream. If the stream is already closed, Close does nothing.
 func (w *WritableStream) Close() (err error) {
 	defer func() {
-		recovered := recover()
-		if recovered != nil {
-			err = fmt.Errorf("panic: %v", recovered)
+		// We don't want any errors to be thrown if the stream is already closed.
+		recovery := recover()
+		if !strings.Contains(recovery.(string), "Can not close stream after closing or error") {
+			err = fmt.Errorf("panic: %v", recovery)
 		}
 	}()
 
