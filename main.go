@@ -18,8 +18,8 @@ type ReadableStream struct {
 // Read reads up to len(p) bytes into p. It returns the number of bytes read (0 <= n <= len(p)) and any error encountered.
 // This implementation of Read does not use scratch space if n < len(p). If some data is available but not len(p) bytes,
 // Read conventionally returns what is available instead of waiting for more. Note: Read will block until data is available,
-// meaning in a WASM environment, you **must** use a goroutine to call Read.
-func (r *ReadableStream) Read(inputBytes []byte) (n int, err error) {
+// meaning in a WASM environment, you must use a goroutine to call Read.
+func (r *ReadableStream) Read(p []byte) (n int, err error) {
 	defer func() {
 		recovered := recover()
 		if recovered != nil {
@@ -33,13 +33,13 @@ func (r *ReadableStream) Read(inputBytes []byte) (n int, err error) {
 
 	reader := r.stream.Call("getReader", map[string]interface{}{"mode": "byob"})
 
-	resultBuffer := js.Global().Get("Uint8Array").New(len(inputBytes))
+	resultBuffer := js.Global().Get("Uint8Array").New(len(p))
 	readResult := reader.Call("read", resultBuffer)
 
 	readResult.Call("then", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		defer waitGroup.Done()
 		data := args[0].Get("value")
-		js.CopyBytesToGo(inputBytes, data)
+		js.CopyBytesToGo(p, data)
 		if args[0].Get("done").Bool() {
 			err = io.EOF
 		}
@@ -82,11 +82,15 @@ func NewReadableStream(stream js.Value) *ReadableStream {
 	return &ReadableStream{stream: stream}
 }
 
+// WritableStream implements io.WriteCloser for a JavaScript WritableStream.
 type WritableStream struct {
 	stream js.Value
 	lock   sync.Mutex
 }
 
+// Write writes len(p) bytes from p to the underlying data stream. It returns the number of bytes written from p (0 <= n <= len(p))
+// and any error encountered that caused the write to stop early. Write must return a non-nil error if it returns n < len(p).
+// Write must not modify the slice data, even temporarily.
 func (w *WritableStream) Write(p []byte) (n int, err error) {
 	defer func() {
 		recovered := recover()
@@ -131,6 +135,7 @@ func (w *WritableStream) Write(p []byte) (n int, err error) {
 	return n, err
 }
 
+// Close closes the WritableStream. If the stream is already closed, Close does nothing.
 func (w *WritableStream) Close() (err error) {
 	defer func() {
 		recovered := recover()
