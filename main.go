@@ -39,11 +39,12 @@ func (r *ReadableStream) Read(p []byte) (n int, err error) {
 
 	readResult.Call("then", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		defer waitGroup.Done()
+		if args[0].Get("done").Bool() || args[0].Get("value").Length() == 0 {
+			err = io.EOF
+			return nil
+		}
 		data := args[0].Get("value")
 		js.CopyBytesToGo(p, data)
-		if args[0].Get("done").Bool() {
-			err = io.EOF
-		}
 		n = data.Length()
 		return nil
 	}))
@@ -161,4 +162,52 @@ func NewWritableStream(stream ...js.Value) *WritableStream {
 		stream := js.Global().Get("WritableStream").New()
 		return &WritableStream{stream: stream}
 	}
+}
+
+// Now we do the vice versa: Reader to ReadableStream and Writer to WritableStream.
+
+// ReaderToReadableStream converts an io.Reader to a JavaScript ReadableStream.
+func ReaderToReadableStream(r io.Reader) js.Value {
+	return js.Global().Get("ReadableStream").New(map[string]interface{}{
+		"pull": js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			readController := args[0]
+			return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+				var buffer []byte
+				buffer, err := io.ReadAll(r)
+				if err != nil {
+					panic(err.Error())
+				}
+				if len(buffer) == 0 {
+					readController.Call("close")
+					return nil
+				}
+				jsBuffer := js.Global().Get("Uint8Array").New(len(buffer))
+				js.CopyBytesToJS(jsBuffer, buffer)
+				readController.Call("enqueue", jsBuffer)
+				readController.Call("close")
+				args[0].Invoke()
+				return nil
+			}))
+		}),
+		"type": "bytes",
+	})
+}
+
+// WriterToWritableStream converts an io.Writer to a JavaScript WritableStream.
+func WriterToWritableStream(w io.Writer) js.Value {
+	return js.Global().Get("WritableStream").New(map[string]interface{}{
+		"write": js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			writeBuffer := args[0]
+			return js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+				buffer := make([]byte, writeBuffer.Length())
+				js.CopyBytesToGo(buffer, writeBuffer)
+				_, err := w.Write(buffer)
+				if err != nil {
+					panic(err.Error())
+				}
+				args[0].Invoke()
+				return nil
+			}))
+		}),
+	})
 }
