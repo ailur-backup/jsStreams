@@ -1,0 +1,2 @@
+tests/index.html -linguist-detectable
+tests/index.html linguist-vendored
