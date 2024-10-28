@@ -67,8 +67,10 @@ func (r *ReadableStream) Close() (err error) {
 	defer func() {
 		// We don't want any errors to be thrown if the stream is already closed.
 		recovery := recover()
-		if !strings.Contains(recovery.(string), "Can not close stream after closing or error") {
-			err = fmt.Errorf("panic: %v", recovery)
+		if !strings.Contains(fmt.Sprint(recovery), "Can not close stream after closing or error") {
+			if recovery != nil {
+				err = fmt.Errorf("panic: %v", recovery)
+			}
 		}
 	}()
 
@@ -141,8 +143,10 @@ func (w *WritableStream) Close() (err error) {
 	defer func() {
 		// We don't want any errors to be thrown if the stream is already closed.
 		recovery := recover()
-		if !strings.Contains(recovery.(string), "Can not close stream after closing or error") {
-			err = fmt.Errorf("panic: %v", recovery)
+		if !strings.Contains(fmt.Sprint(recovery), "Can not close stream after closing or error") {
+			if recovery != nil {
+				err = fmt.Errorf("panic: %v", recovery)
+			}
 		}
 	}()
 

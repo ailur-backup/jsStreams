@@ -21,6 +21,10 @@ func main() {
 				return
 			}
 			fmt.Println(string(buffer))
+			err = readStream.Close()
+			if err != nil {
+				fmt.Println(err)
+			}
 		}()
 
 		return nil
@@ -33,6 +37,10 @@ func main() {
 			if err != nil {
 				fmt.Println(err)
 				return
+			}
+			err = writeStream.Close()
+			if err != nil {
+				fmt.Println(err)
 			}
 		}()
 
